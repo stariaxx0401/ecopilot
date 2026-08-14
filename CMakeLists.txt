@@ -9,6 +9,9 @@ find_package(SDL2 REQUIRED)
 
 add_executable(ecopilot
     src/main.c
+    src/vehicle.c
+    src/sensor.c
+    src/energy.c
 )
 
 target_include_directories(ecopilot PRIVATE
