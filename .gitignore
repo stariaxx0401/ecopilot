@@ -1,0 +1,14 @@
+# Build output
+build/
+
+# vcpkg (dependency manager - not part of the project source)
+vcpkg/
+
+# IDE / editor files
+.vs/
+.vscode/
+*.user
+
+# OS files
+Thumbs.db
+.DS_Store
