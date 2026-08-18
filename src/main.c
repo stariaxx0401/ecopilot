@@ -1,10 +1,15 @@
+#define _USE_MATH_DEFINES
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <math.h>
 #include "vehicle.h"
+#include "sensor.h"
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
+
+#define OBSTACLE_COUNT 3
+#define MAX_SENSOR_RANGE 400.0f
 
 /* Vehicle rendering size (rectangle dimensions in pixels). */
 #define VEHICLE_LENGTH 40.0f
@@ -54,6 +59,23 @@ static void draw_vehicle(SDL_Renderer *renderer, const Vehicle *v) {
     SDL_RenderGeometry(renderer, NULL, vertices, 4, indices, 6);
 }
 
+/* Draws an obstacle as a filled rectangle. */
+static void draw_obstacle(SDL_Renderer *renderer, const Obstacle *obstacle) {
+    SDL_SetRenderDrawColor(renderer, 200, 80, 80, 255);
+    SDL_FRect rect = { obstacle->x, obstacle->y, obstacle->width, obstacle->height };
+    SDL_RenderFillRectF(renderer, &rect);
+}
+
+/* Draws a single ray as a line from the vehicle out to the hit point (or max range). */
+static void draw_ray(SDL_Renderer *renderer, const Vehicle *v, float angle_offset_degrees, float distance) {
+    float angle_radians = (v->angle + angle_offset_degrees) * (float)M_PI / 180.0f;
+    float end_x = v->x + cosf(angle_radians) * distance;
+    float end_y = v->y + sinf(angle_radians) * distance;
+
+    SDL_SetRenderDrawColor(renderer, 255, 220, 80, 255);
+    SDL_RenderDrawLineF(renderer, v->x, v->y, end_x, end_y);
+}
+
 int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
@@ -86,6 +108,13 @@ int main(int argc, char *argv[]) {
     }
 
     Vehicle vehicle = vehicle_create(WINDOW_WIDTH / 2.0f, WINDOW_HEIGHT / 2.0f);
+
+    /* A few fixed obstacles scattered around the map. */
+    Obstacle obstacles[OBSTACLE_COUNT] = {
+        { 550.0f, 150.0f, 80.0f, 200.0f },
+        { 150.0f, 400.0f, 200.0f, 60.0f },
+        { 350.0f, 80.0f, 120.0f, 40.0f }
+    };
 
     int running = 1;
     SDL_Event event;
@@ -135,6 +164,14 @@ int main(int argc, char *argv[]) {
         /* Clear screen (dark background). */
         SDL_SetRenderDrawColor(renderer, 25, 25, 30, 255);
         SDL_RenderClear(renderer);
+
+        for (int i = 0; i < OBSTACLE_COUNT; i++) {
+            draw_obstacle(renderer, &obstacles[i]);
+        }
+
+        /* Cast a single ray straight ahead from the vehicle and draw it. */
+        float distance = sensor_cast_ray(&vehicle, 0.0f, obstacles, OBSTACLE_COUNT, MAX_SENSOR_RANGE);
+        draw_ray(renderer, &vehicle, 0.0f, distance);
 
         draw_vehicle(renderer, &vehicle);
 
