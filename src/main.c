@@ -11,6 +11,10 @@
 #define OBSTACLE_COUNT 3
 #define MAX_SENSOR_RANGE 400.0f
 
+/* Lidar configuration: cast this many rays spread across a field of view. */
+#define LIDAR_RAY_COUNT 8
+#define LIDAR_FOV_DEGREES 120.0f  /* total field of view, centered on vehicle's heading */
+
 /* Vehicle rendering size (rectangle dimensions in pixels). */
 #define VEHICLE_LENGTH 40.0f
 #define VEHICLE_WIDTH 20.0f
@@ -169,9 +173,14 @@ int main(int argc, char *argv[]) {
             draw_obstacle(renderer, &obstacles[i]);
         }
 
-        /* Cast a single ray straight ahead from the vehicle and draw it. */
-        float distance = sensor_cast_ray(&vehicle, 0.0f, obstacles, OBSTACLE_COUNT, MAX_SENSOR_RANGE);
-        draw_ray(renderer, &vehicle, 0.0f, distance);
+        /* Cast multiple rays spread across the field of view (basic lidar simulation). */
+        for (int i = 0; i < LIDAR_RAY_COUNT; i++) {
+            /* Spread rays evenly from -FOV/2 to +FOV/2 around the vehicle's heading. */
+            float angle_offset = -LIDAR_FOV_DEGREES / 2.0f +
+                (LIDAR_FOV_DEGREES * i) / (float)(LIDAR_RAY_COUNT - 1);
+            float distance = sensor_cast_ray(&vehicle, angle_offset, obstacles, OBSTACLE_COUNT, MAX_SENSOR_RANGE);
+            draw_ray(renderer, &vehicle, angle_offset, distance);
+        }
 
         draw_vehicle(renderer, &vehicle);
 
