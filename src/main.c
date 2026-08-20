@@ -15,6 +15,10 @@
 #define LIDAR_RAY_COUNT 8
 #define LIDAR_FOV_DEGREES 120.0f  /* total field of view, centered on vehicle's heading */
 
+/* If any ray detects an obstacle closer than this, start avoiding. */
+#define AVOIDANCE_THRESHOLD 100.0f
+#define AVOIDANCE_TURN_SPEED 120.0f /* degrees/sec, applied on top of manual turning */
+
 /* Vehicle rendering size (rectangle dimensions in pixels). */
 #define VEHICLE_LENGTH 40.0f
 #define VEHICLE_WIDTH 20.0f
@@ -174,12 +178,40 @@ int main(int argc, char *argv[]) {
         }
 
         /* Cast multiple rays spread across the field of view (basic lidar simulation). */
+        float ray_distances[LIDAR_RAY_COUNT];
         for (int i = 0; i < LIDAR_RAY_COUNT; i++) {
             /* Spread rays evenly from -FOV/2 to +FOV/2 around the vehicle's heading. */
             float angle_offset = -LIDAR_FOV_DEGREES / 2.0f +
                 (LIDAR_FOV_DEGREES * i) / (float)(LIDAR_RAY_COUNT - 1);
             float distance = sensor_cast_ray(&vehicle, angle_offset, obstacles, OBSTACLE_COUNT, MAX_SENSOR_RANGE);
+            ray_distances[i] = distance;
             draw_ray(renderer, &vehicle, angle_offset, distance);
+        }
+
+        /* Simple avoidance: compare average distance on the left half vs right half
+           of the field of view. If something is close, steer toward the more open side. */
+        float left_avg = 0.0f, right_avg = 0.0f;
+        int half = LIDAR_RAY_COUNT / 2;
+        for (int i = 0; i < half; i++) {
+            left_avg += ray_distances[i];
+        }
+        for (int i = half; i < LIDAR_RAY_COUNT; i++) {
+            right_avg += ray_distances[i];
+        }
+        left_avg /= half;
+        right_avg /= (LIDAR_RAY_COUNT - half);
+
+        float closest = ray_distances[0];
+        for (int i = 1; i < LIDAR_RAY_COUNT; i++) {
+            if (ray_distances[i] < closest) closest = ray_distances[i];
+        }
+
+        if (closest < AVOIDANCE_THRESHOLD) {
+            if (left_avg < right_avg) {
+                vehicle.angle -= AVOIDANCE_TURN_SPEED * delta_time;
+            } else {
+                vehicle.angle += AVOIDANCE_TURN_SPEED * delta_time;
+            }
         }
 
         draw_vehicle(renderer, &vehicle);
