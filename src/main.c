@@ -208,9 +208,11 @@ int main(int argc, char *argv[]) {
 
         if (closest < AVOIDANCE_THRESHOLD) {
             if (left_avg < right_avg) {
-                vehicle.angle -= AVOIDANCE_TURN_SPEED * delta_time;
-            } else {
+                /* Obstacle is closer on the left -> steer away, to the right. */
                 vehicle.angle += AVOIDANCE_TURN_SPEED * delta_time;
+            } else {
+                /* Obstacle is closer on the right -> steer away, to the left. */
+                vehicle.angle -= AVOIDANCE_TURN_SPEED * delta_time;
             }
         }
 
