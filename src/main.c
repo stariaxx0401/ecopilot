@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
         total_elapsed_time += delta_time;
         energy_update(&energy_tracker, vehicle.speed, delta_time);
         if (total_elapsed_time - last_score_print_time >= 1.0f) {
-            int score = energy_calculate_eco_score(&energy_tracker, total_elapsed_time);
+            int score = energy_calculate_eco_score(&energy_tracker);
             printf("Eco-score: %d (total energy: %.1f)\n", score, energy_tracker.total_energy);
             last_score_print_time = total_elapsed_time;
         }
