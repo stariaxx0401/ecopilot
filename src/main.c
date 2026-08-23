@@ -4,6 +4,7 @@
 #include <math.h>
 #include "vehicle.h"
 #include "sensor.h"
+#include "energy.h"
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
@@ -116,6 +117,9 @@ int main(int argc, char *argv[]) {
     }
 
     Vehicle vehicle = vehicle_create(WINDOW_WIDTH / 2.0f, WINDOW_HEIGHT / 2.0f);
+    EnergyTracker energy_tracker = energy_tracker_create();
+    float total_elapsed_time = 0.0f;
+    float last_score_print_time = 0.0f;
 
     /* A few fixed obstacles scattered around the map. */
     Obstacle obstacles[OBSTACLE_COUNT] = {
@@ -168,6 +172,16 @@ int main(int argc, char *argv[]) {
         }
 
         vehicle_update(&vehicle, delta_time);
+
+        /* Track energy consumption and print the eco-score to the console
+           roughly once per second (HUD display comes on Day 7). */
+        total_elapsed_time += delta_time;
+        energy_update(&energy_tracker, vehicle.speed, delta_time);
+        if (total_elapsed_time - last_score_print_time >= 1.0f) {
+            int score = energy_calculate_eco_score(&energy_tracker, total_elapsed_time);
+            printf("Eco-score: %d (total energy: %.1f)\n", score, energy_tracker.total_energy);
+            last_score_print_time = total_elapsed_time;
+        }
 
         /* Clear screen (dark background). */
         SDL_SetRenderDrawColor(renderer, 25, 25, 30, 255);
