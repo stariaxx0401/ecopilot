@@ -85,6 +85,31 @@ static void draw_ray(SDL_Renderer *renderer, const Vehicle *v, float angle_offse
     SDL_RenderDrawLineF(renderer, v->x, v->y, end_x, end_y);
 }
 
+/* HUD layout constants. */
+#define HUD_BAR_X 20
+#define HUD_BAR_WIDTH 200
+#define HUD_BAR_HEIGHT 16
+#define HUD_BAR_SPACING 28
+
+/* Draws a single labeled bar: a dark background rect with a colored fill
+   proportional to (value / max_value), clamped to [0, 1]. */
+static void draw_hud_bar(SDL_Renderer *renderer, int y, float value, float max_value,
+                          Uint8 r, Uint8 g, Uint8 b) {
+    float fraction = value / max_value;
+    if (fraction < 0.0f) fraction = 0.0f;
+    if (fraction > 1.0f) fraction = 1.0f;
+
+    /* Background (empty part of the bar). */
+    SDL_SetRenderDrawColor(renderer, 60, 60, 65, 255);
+    SDL_FRect background = { (float)HUD_BAR_X, (float)y, (float)HUD_BAR_WIDTH, (float)HUD_BAR_HEIGHT };
+    SDL_RenderFillRectF(renderer, &background);
+
+    /* Filled portion. */
+    SDL_SetRenderDrawColor(renderer, r, g, b, 255);
+    SDL_FRect fill = { (float)HUD_BAR_X, (float)y, (float)HUD_BAR_WIDTH * fraction, (float)HUD_BAR_HEIGHT };
+    SDL_RenderFillRectF(renderer, &fill);
+}
+
 int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
@@ -202,35 +227,18 @@ int main(int argc, char *argv[]) {
             draw_ray(renderer, &vehicle, angle_offset, distance);
         }
 
-        /* Simple avoidance: compare average distance on the left half vs right half
-           of the field of view. If something is close, steer toward the more open side. */
-        float left_avg = 0.0f, right_avg = 0.0f;
-        int half = LIDAR_RAY_COUNT / 2;
-        for (int i = 0; i < half; i++) {
-            left_avg += ray_distances[i];
-        }
-        for (int i = half; i < LIDAR_RAY_COUNT; i++) {
-            right_avg += ray_distances[i];
-        }
-        left_avg /= half;
-        right_avg /= (LIDAR_RAY_COUNT - half);
-
-        float closest = ray_distances[0];
-        for (int i = 1; i < LIDAR_RAY_COUNT; i++) {
-            if (ray_distances[i] < closest) closest = ray_distances[i];
-        }
-
-        if (closest < AVOIDANCE_THRESHOLD) {
-            if (left_avg < right_avg) {
-                /* Obstacle is closer on the left -> steer away, to the right. */
-                vehicle.angle += AVOIDANCE_TURN_SPEED * delta_time;
-            } else {
-                /* Obstacle is closer on the right -> steer away, to the left. */
-                vehicle.angle -= AVOIDANCE_TURN_SPEED * delta_time;
-            }
-        }
+        /* Ask the sensor module whether we should steer away from something close. */
+        float avoidance_direction = sensor_compute_avoidance_direction(
+            ray_distances, LIDAR_RAY_COUNT, AVOIDANCE_THRESHOLD);
+        vehicle.angle += avoidance_direction * AVOIDANCE_TURN_SPEED * delta_time;
 
         draw_vehicle(renderer, &vehicle);
+
+        /* HUD: speed bar (green), consumption rate bar (orange), eco-score bar (blue). */
+        int current_score = energy_calculate_eco_score(&energy_tracker);
+        draw_hud_bar(renderer, 20, fabsf(vehicle.speed), MAX_SPEED, 90, 200, 120);
+        draw_hud_bar(renderer, 20 + HUD_BAR_SPACING, energy_tracker.smoothed_rate, 80.0f, 230, 150, 60);
+        draw_hud_bar(renderer, 20 + HUD_BAR_SPACING * 2, (float)current_score, 100.0f, 90, 150, 230);
 
         SDL_RenderPresent(renderer);
         SDL_Delay(16); /* cap roughly at 60 FPS */

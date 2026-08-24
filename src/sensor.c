@@ -55,3 +55,33 @@ float sensor_cast_ray(const Vehicle *vehicle, float angle_offset_degrees,
 
     return closest_distance;
 }
+
+float sensor_compute_avoidance_direction(const float *ray_distances, int ray_count,
+                                          float avoidance_threshold) {
+    /* Compare average distance on the left half vs right half of the field
+       of view. If something is close, steer toward the more open side. */
+    float left_avg = 0.0f, right_avg = 0.0f;
+    int half = ray_count / 2;
+
+    for (int i = 0; i < half; i++) {
+        left_avg += ray_distances[i];
+    }
+    for (int i = half; i < ray_count; i++) {
+        right_avg += ray_distances[i];
+    }
+    left_avg /= half;
+    right_avg /= (ray_count - half);
+
+    float closest = ray_distances[0];
+    for (int i = 1; i < ray_count; i++) {
+        if (ray_distances[i] < closest) closest = ray_distances[i];
+    }
+
+    if (closest >= avoidance_threshold) {
+        return 0.0f;
+    }
+
+    /* Obstacle closer on the left -> steer away, to the right (+1).
+       Obstacle closer on the right -> steer away, to the left (-1). */
+    return (left_avg < right_avg) ? 1.0f : -1.0f;
+}

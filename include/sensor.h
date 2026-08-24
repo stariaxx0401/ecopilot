@@ -18,4 +18,12 @@ float sensor_cast_ray(const Vehicle *vehicle, float angle_offset_degrees,
                        const Obstacle *obstacles, int obstacle_count,
                        float max_distance);
 
+/* Given an array of ray distances (as produced by sensor_cast_ray, spread
+   evenly across a field of view), decides whether the vehicle should steer
+   away from a nearby obstacle. Returns -1.0 (steer left), 0.0 (no obstacle
+   close enough to react to), or +1.0 (steer right) - the caller multiplies
+   this by their own turn speed and delta time. */
+float sensor_compute_avoidance_direction(const float *ray_distances, int ray_count,
+                                          float avoidance_threshold);
+
 #endif /* SENSOR_H */
