@@ -10,6 +10,9 @@
 #define WINDOW_HEIGHT 600
 
 #define OBSTACLE_COUNT 3
+#define WALL_COUNT 4
+#define TOTAL_OBSTACLE_COUNT (OBSTACLE_COUNT + WALL_COUNT)
+#define WALL_THICKNESS 4.0f
 #define MAX_SENSOR_RANGE 400.0f
 
 /* Lidar configuration: cast this many rays spread across a field of view. */
@@ -146,11 +149,20 @@ int main(int argc, char *argv[]) {
     float total_elapsed_time = 0.0f;
     float last_score_print_time = 0.0f;
 
-    /* A few fixed obstacles scattered around the map. */
-    Obstacle obstacles[OBSTACLE_COUNT] = {
+    /* A few fixed obstacles scattered around the map, plus four boundary
+       walls so the vehicle can't drive off-screen. */
+    Obstacle obstacles[TOTAL_OBSTACLE_COUNT] = {
         { 550.0f, 150.0f, 80.0f, 200.0f },
         { 150.0f, 400.0f, 200.0f, 60.0f },
-        { 350.0f, 80.0f, 120.0f, 40.0f }
+        { 350.0f, 80.0f, 120.0f, 40.0f },
+        /* Top wall */
+        { 0.0f, 0.0f, (float)WINDOW_WIDTH, WALL_THICKNESS },
+        /* Bottom wall */
+        { 0.0f, (float)WINDOW_HEIGHT - WALL_THICKNESS, (float)WINDOW_WIDTH, WALL_THICKNESS },
+        /* Left wall */
+        { 0.0f, 0.0f, WALL_THICKNESS, (float)WINDOW_HEIGHT },
+        /* Right wall */
+        { (float)WINDOW_WIDTH - WALL_THICKNESS, 0.0f, WALL_THICKNESS, (float)WINDOW_HEIGHT }
     };
 
     int running = 1;
@@ -198,6 +210,58 @@ int main(int argc, char *argv[]) {
 
         vehicle_update(&vehicle, delta_time);
 
+        /* Hard safety net: clamp the vehicle inside the screen bounds even if
+           the avoidance logic didn't react quickly enough. Keeps the vehicle's
+           rectangle fully inside the walls. */
+        float half_diagonal = sqrtf((VEHICLE_LENGTH / 2.0f) * (VEHICLE_LENGTH / 2.0f) +
+                                     (VEHICLE_WIDTH / 2.0f) * (VEHICLE_WIDTH / 2.0f));
+        float min_x = WALL_THICKNESS + half_diagonal;
+        float max_x = (float)WINDOW_WIDTH - WALL_THICKNESS - half_diagonal;
+        float min_y = WALL_THICKNESS + half_diagonal;
+        float max_y = (float)WINDOW_HEIGHT - WALL_THICKNESS - half_diagonal;
+
+        if (vehicle.x < min_x) vehicle.x = min_x;
+        if (vehicle.x > max_x) vehicle.x = max_x;
+        if (vehicle.y < min_y) vehicle.y = min_y;
+        if (vehicle.y > max_y) vehicle.y = max_y;
+
+        /* Hard collision prevention against the scattered obstacles (not the
+           walls, already handled above): treat the vehicle as a circle and
+           push it back out if it overlaps a rectangle. */
+        for (int i = 0; i < OBSTACLE_COUNT; i++) {
+            const Obstacle *obs = &obstacles[i];
+            /* Closest point on the rectangle to the vehicle's center. */
+            float closest_x = vehicle.x;
+            if (closest_x < obs->x) closest_x = obs->x;
+            if (closest_x > obs->x + obs->width) closest_x = obs->x + obs->width;
+            float closest_y = vehicle.y;
+            if (closest_y < obs->y) closest_y = obs->y;
+            if (closest_y > obs->y + obs->height) closest_y = obs->y + obs->height;
+
+            float dx = vehicle.x - closest_x;
+            float dy = vehicle.y - closest_y;
+            float dist_sq = dx * dx + dy * dy;
+
+            if (dist_sq < half_diagonal * half_diagonal) {
+                float dist = sqrtf(dist_sq);
+                if (dist > 0.0001f) {
+                    /* Push the vehicle out along the vector from the closest
+                       point to the vehicle's center, with a small extra margin
+                       so it doesn't immediately re-trigger next frame. */
+                    float push = (half_diagonal - dist) + 0.5f;
+                    vehicle.x += (dx / dist) * push;
+                    vehicle.y += (dy / dist) * push;
+                } else {
+                    /* Vehicle center is exactly on the rectangle edge (rare) -
+                       push straight up as a fallback. */
+                    vehicle.y -= half_diagonal;
+                }
+                /* Note: we don't kill speed here - the distance-based slowdown
+                   above already handles that. Doing both was causing the
+                   vehicle to get stuck (speed reset every frame while close). */
+            }
+        }
+
         /* Track energy consumption and print the eco-score to the console
            roughly once per second (HUD display comes on Day 7). */
         total_elapsed_time += delta_time;
@@ -212,7 +276,7 @@ int main(int argc, char *argv[]) {
         SDL_SetRenderDrawColor(renderer, 25, 25, 30, 255);
         SDL_RenderClear(renderer);
 
-        for (int i = 0; i < OBSTACLE_COUNT; i++) {
+        for (int i = 0; i < TOTAL_OBSTACLE_COUNT; i++) {
             draw_obstacle(renderer, &obstacles[i]);
         }
 
@@ -222,7 +286,7 @@ int main(int argc, char *argv[]) {
             /* Spread rays evenly from -FOV/2 to +FOV/2 around the vehicle's heading. */
             float angle_offset = -LIDAR_FOV_DEGREES / 2.0f +
                 (LIDAR_FOV_DEGREES * i) / (float)(LIDAR_RAY_COUNT - 1);
-            float distance = sensor_cast_ray(&vehicle, angle_offset, obstacles, OBSTACLE_COUNT, MAX_SENSOR_RANGE);
+            float distance = sensor_cast_ray(&vehicle, angle_offset, obstacles, TOTAL_OBSTACLE_COUNT, MAX_SENSOR_RANGE);
             ray_distances[i] = distance;
             draw_ray(renderer, &vehicle, angle_offset, distance);
         }
@@ -231,6 +295,22 @@ int main(int argc, char *argv[]) {
         float avoidance_direction = sensor_compute_avoidance_direction(
             ray_distances, LIDAR_RAY_COUNT, AVOIDANCE_THRESHOLD);
         vehicle.angle += avoidance_direction * AVOIDANCE_TURN_SPEED * delta_time;
+
+        /* Also cap the speed when something is close - turning alone isn't
+           enough to avoid a collision if the vehicle is moving fast. Using a
+           speed CAP (not a per-frame multiply) avoids repeatedly crushing the
+           speed every frame, which felt sluggish when boxed in near a wall. */
+        float closest_distance = ray_distances[0];
+        for (int i = 1; i < LIDAR_RAY_COUNT; i++) {
+            if (ray_distances[i] < closest_distance) closest_distance = ray_distances[i];
+        }
+        if (closest_distance < AVOIDANCE_THRESHOLD) {
+            float speed_cap_factor = closest_distance / AVOIDANCE_THRESHOLD;
+            if (speed_cap_factor < 0.7f) speed_cap_factor = 0.7f; /* always allow reasonable escape speed */
+            float speed_cap = MAX_SPEED * speed_cap_factor;
+            if (vehicle.speed > speed_cap) vehicle.speed = speed_cap;
+            if (vehicle.speed < -speed_cap) vehicle.speed = -speed_cap;
+        }
 
         draw_vehicle(renderer, &vehicle);
 
