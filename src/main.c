@@ -32,8 +32,9 @@
 #define MAX_SPEED 200.0f      /* pixels/sec */
 #define TURN_SPEED 180.0f     /* degrees/sec */
 
-/* Draws the vehicle as a rotated rectangle using SDL_RenderGeometry
-   (four points forming two triangles). */
+/* Draws the vehicle as a rotated rectangle (body) with a triangular nose at
+   the front and two small headlight dots, so it reads clearly as a "car"
+   and its heading is obvious at a glance. */
 static void draw_vehicle(SDL_Renderer *renderer, const Vehicle *v) {
     float radians = v->angle * (float)M_PI / 180.0f;
     float cos_a = cosf(radians);
@@ -42,40 +43,94 @@ static void draw_vehicle(SDL_Renderer *renderer, const Vehicle *v) {
     float half_len = VEHICLE_LENGTH / 2.0f;
     float half_wid = VEHICLE_WIDTH / 2.0f;
 
-    /* Local-space corners of the rectangle (before rotation). */
-    SDL_FPoint local_corners[4] = {
+    /* Helper to rotate a local-space point around the vehicle and offset by its position. */
+    #define ROTATE_POINT(lx, ly, out_x, out_y) \
+        out_x = v->x + ((lx) * cos_a - (ly) * sin_a); \
+        out_y = v->y + ((lx) * sin_a + (ly) * cos_a);
+
+    /* --- Body (main rectangle) --- */
+    SDL_FPoint body_local[4] = {
         { -half_len, -half_wid },
         {  half_len, -half_wid },
         {  half_len,  half_wid },
         { -half_len,  half_wid }
     };
 
-    SDL_Vertex vertices[4];
+    SDL_Vertex body_vertices[4];
     for (int i = 0; i < 4; i++) {
-        float lx = local_corners[i].x;
-        float ly = local_corners[i].y;
-        float rotated_x = lx * cos_a - ly * sin_a;
-        float rotated_y = lx * sin_a + ly * cos_a;
+        float wx, wy;
+        ROTATE_POINT(body_local[i].x, body_local[i].y, wx, wy);
+        body_vertices[i].position.x = wx;
+        body_vertices[i].position.y = wy;
+        body_vertices[i].color.r = 70;
+        body_vertices[i].color.g = 180;
+        body_vertices[i].color.b = 110;
+        body_vertices[i].color.a = 255;
+        body_vertices[i].tex_coord.x = 0;
+        body_vertices[i].tex_coord.y = 0;
+    }
+    int body_indices[6] = { 0, 1, 2, 0, 2, 3 };
+    SDL_RenderGeometry(renderer, NULL, body_vertices, 4, body_indices, 6);
 
-        vertices[i].position.x = v->x + rotated_x;
-        vertices[i].position.y = v->y + rotated_y;
-        vertices[i].color.r = 80;
-        vertices[i].color.g = 200;
-        vertices[i].color.b = 120;
-        vertices[i].color.a = 255;
-        vertices[i].tex_coord.x = 0;
-        vertices[i].tex_coord.y = 0;
+    /* --- Nose (small triangle at the front, pointing in the direction of travel) --- */
+    SDL_FPoint nose_local[3] = {
+        { half_len,        0.0f },        /* tip */
+        { half_len - 12.0f, -half_wid },   /* back-left */
+        { half_len - 12.0f,  half_wid }    /* back-right */
+    };
+
+    SDL_Vertex nose_vertices[3];
+    for (int i = 0; i < 3; i++) {
+        float wx, wy;
+        ROTATE_POINT(nose_local[i].x, nose_local[i].y, wx, wy);
+        nose_vertices[i].position.x = wx;
+        nose_vertices[i].position.y = wy;
+        nose_vertices[i].color.r = 230;
+        nose_vertices[i].color.g = 220;
+        nose_vertices[i].color.b = 100;
+        nose_vertices[i].color.a = 255;
+        nose_vertices[i].tex_coord.x = 0;
+        nose_vertices[i].tex_coord.y = 0;
+    }
+    int nose_indices[3] = { 0, 1, 2 };
+    SDL_RenderGeometry(renderer, NULL, nose_vertices, 3, nose_indices, 3);
+
+    /* --- Headlights (two small squares near the front corners) --- */
+    SDL_SetRenderDrawColor(renderer, 255, 250, 210, 255);
+    float light_positions[2][2] = {
+        { half_len - 4.0f, -half_wid + 3.0f },
+        { half_len - 4.0f,  half_wid - 3.0f }
+    };
+    for (int i = 0; i < 2; i++) {
+        float wx, wy;
+        ROTATE_POINT(light_positions[i][0], light_positions[i][1], wx, wy);
+        SDL_FRect light_rect = { wx - 2.0f, wy - 2.0f, 4.0f, 4.0f };
+        SDL_RenderFillRectF(renderer, &light_rect);
     }
 
-    int indices[6] = { 0, 1, 2, 0, 2, 3 };
-    SDL_RenderGeometry(renderer, NULL, vertices, 4, indices, 6);
+    #undef ROTATE_POINT
 }
 
-/* Draws an obstacle as a filled rectangle. */
+/* Draws an obstacle as a filled rectangle with a darker border, for a bit
+   more visual depth than a single flat color. */
 static void draw_obstacle(SDL_Renderer *renderer, const Obstacle *obstacle) {
-    SDL_SetRenderDrawColor(renderer, 200, 80, 80, 255);
-    SDL_FRect rect = { obstacle->x, obstacle->y, obstacle->width, obstacle->height };
-    SDL_RenderFillRectF(renderer, &rect);
+    /* Border (slightly larger, darker rectangle drawn first). */
+    SDL_SetRenderDrawColor(renderer, 120, 45, 45, 255);
+    SDL_FRect border_rect = { obstacle->x, obstacle->y, obstacle->width, obstacle->height };
+    SDL_RenderFillRectF(renderer, &border_rect);
+
+    /* Inset fill (lighter, leaves a visible border on all sides). */
+    SDL_SetRenderDrawColor(renderer, 200, 90, 90, 255);
+    float border_thickness = 3.0f;
+    SDL_FRect fill_rect = {
+        obstacle->x + border_thickness,
+        obstacle->y + border_thickness,
+        obstacle->width - border_thickness * 2.0f,
+        obstacle->height - border_thickness * 2.0f
+    };
+    if (fill_rect.w > 0 && fill_rect.h > 0) {
+        SDL_RenderFillRectF(renderer, &fill_rect);
+    }
 }
 
 /* Draws a single ray as a line from the vehicle out to the hit point (or max range). */
