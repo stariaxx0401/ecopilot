@@ -2,6 +2,8 @@
 
 An energy-aware 2D autonomous driving simulator, written in C with SDL2.
 
+![ecopilot demo](demo.gif)
+
 The vehicle navigates a small map using a simulated lidar sensor (raycasting),
 steering itself around obstacles while a real-time energy model tracks how
 efficiently it drives.
